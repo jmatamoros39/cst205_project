@@ -6,15 +6,16 @@ import subprocess
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QFileDialog, QComboBox, QFrame,
-    QSizePolicy, QProgressBar, QMessageBox
+    QSizePolicy, QProgressBar, QMessageBox, QSplashScreen
 )
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal, QTimer
+from PySide6.QtGui import QPixmap, QFont
 
 VIDEO_FORMATS = ["mp4", "mov", "avi", "mkv", "webm", "wmv"]
 DOC_FORMATS = ["pdf", "jpg", "png", "docx"]
 RES_MAP = {"480p": 480, "720p": 720, "1080p": 1080}
 
-
+# === ConversionThread class ===
 class ConversionThread(QThread):
     progress = Signal(int)
     finished = Signal(str)
@@ -54,7 +55,7 @@ class ConversionThread(QThread):
                             percent = int((seconds / total_duration) * 100)
                             self.progress.emit(min(percent, 100))
                         except:
-                            pass  # skip parsing errors
+                            pass
 
                 process.wait()
                 if process.returncode != 0:
@@ -67,7 +68,6 @@ class ConversionThread(QThread):
                 self.error.emit(str(e))
 
         else:
-            # Non-video conversion simulated progress bar
             for i in range(101):
                 self.progress.emit(i)
                 self.msleep(20)
@@ -87,24 +87,23 @@ class ConversionThread(QThread):
                 return 1.0
             return duration
         except Exception:
-            return 1.0  # Fallback if ffprobe fails
+            return 1.0
 
-
+# === Main Application ===
 class App(QWidget):
     def __init__(self):
         super().__init__()
         self.file_path = None
         self.is_video = False
 
-        self.setWindowTitle("Simple File Converter")
+        self.setWindowTitle("File Converter")
         self.setMinimumSize(450, 280)
 
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(15)
 
-        # Title
-        title = QLabel("Simple File Converter")
+        title = QLabel("File Converter")
         title.setObjectName("TitleLabel")
         title.setAlignment(Qt.AlignCenter)
 
@@ -120,7 +119,7 @@ class App(QWidget):
         line.setFrameShadow(QFrame.Sunken)
         main_layout.addWidget(line)
 
-        # Pick file
+        # File picker
         file_row = QHBoxLayout()
         self.label = QLabel("No file selected")
         self.label.setObjectName("PathLabel")
@@ -133,7 +132,7 @@ class App(QWidget):
         file_row.addWidget(self.btn_pick)
         main_layout.addLayout(file_row)
 
-        # Format/resolution
+        # Format + resolution
         row2 = QHBoxLayout()
         self.format_box = QComboBox()
         self.format_box.currentTextChanged.connect(self.update_resolution_enabled)
@@ -154,7 +153,7 @@ class App(QWidget):
         row2.addWidget(self.btn_convert)
         main_layout.addLayout(row2)
 
-        # Progress bar (hidden by default)
+        # Progress bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(True)
@@ -169,7 +168,8 @@ class App(QWidget):
 
         main_layout.addStretch()
         self.setLayout(main_layout)
-        
+
+        # Style
         self.setStyleSheet("""
             QWidget {
                 font-family: Segoe UI, Arial;
@@ -202,6 +202,7 @@ class App(QWidget):
             }
         """)
 
+    # --- File selection ---
     def pick(self):
         path, _ = QFileDialog.getOpenFileName(self, "Pick a file")
         if not path:
@@ -225,9 +226,9 @@ class App(QWidget):
             self.format_box.addItems(DOC_FORMATS)
             self.resolution_box.setEnabled(False)
 
+    # --- Load resolutions ---
     def load_video_resolutions(self, path):
         try:
-            # Use ffprobe to get video height
             cmd = [
                 "ffprobe", "-v", "error",
                 "-select_streams", "v:0",
@@ -261,6 +262,7 @@ class App(QWidget):
         else:
             self.resolution_box.setEnabled(False)
 
+    # --- Conversion ---
     def convert(self):
         if not self.file_path:
             return
@@ -292,9 +294,38 @@ class App(QWidget):
         self.progress_bar.setValue(0)
         self.progress_bar.hide()
 
+# === Splash screen ===
+def show_splash(app):
+    width, height = 500, 250
+    pixmap = QPixmap(width, height)
+    pixmap.fill(Qt.gray)  # background color
+    splash = QSplashScreen(pixmap)
+    splash.setFont(QFont("Segoe UI", 24, QFont.Bold))
+    splash.showMessage("File Converter", alignment=Qt.AlignCenter, color=Qt.white)
 
+    # Center splash
+    screen_geo = app.primaryScreen().geometry()
+    splash.move(
+        (screen_geo.width() - width) // 2,
+        (screen_geo.height() - height) // 2
+    )
+
+    splash.show()
+    return splash
+
+# === Main entry point ===
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    w = App()
-    w.show()
+
+    splash = show_splash(app)
+
+    main_window = None
+
+    def open_main():
+        global main_window
+        main_window = App()
+        main_window.show()
+        splash.close()
+
+    QTimer.singleShot(2000, open_main)
     sys.exit(app.exec())
