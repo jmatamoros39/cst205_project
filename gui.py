@@ -1,24 +1,109 @@
 import sys
-import requests
+import tempfile
+import os
+import shutil
+import subprocess
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QFileDialog, QComboBox, QFrame,
-    QSizePolicy
+    QSizePolicy, QProgressBar, QMessageBox
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread, Signal
+
+VIDEO_FORMATS = ["mp4", "mov", "avi", "mkv", "webm", "wmv"]
+DOC_FORMATS = ["pdf", "jpg", "png", "docx"]
+RES_MAP = {"480p": 480, "720p": 720, "1080p": 1080}
+
+
+class ConversionThread(QThread):
+    progress = Signal(int)
+    finished = Signal(str)
+    error = Signal(str)
+
+    def __init__(self, input_path, target_ext, resolution, output_path):
+        super().__init__()
+        self.input_path = input_path
+        self.target_ext = target_ext
+        self.resolution = resolution
+        self.output_path = output_path
+
+    def run(self):
+        if self.target_ext in VIDEO_FORMATS:
+            scale_args = []
+            if self.resolution in RES_MAP:
+                scale_args = ["-vf", f"scale=-2:{RES_MAP[self.resolution]}"]
+
+            cmd = ["ffmpeg", "-y", "-i", self.input_path, *scale_args, self.output_path]
+
+            try:
+                process = subprocess.Popen(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True
+                )
+
+                total_duration = self.get_video_duration(self.input_path)
+
+                while True:
+                    line = process.stderr.readline()
+                    if not line:
+                        break
+                    if "time=" in line:
+                        try:
+                            time_str = line.split("time=")[1].split(" ")[0]
+                            h, m, s = map(float, time_str.split(":"))
+                            seconds = h * 3600 + m * 60 + s
+                            percent = int((seconds / total_duration) * 100)
+                            self.progress.emit(min(percent, 100))
+                        except:
+                            pass  # skip parsing errors
+
+                process.wait()
+                if process.returncode != 0:
+                    self.error.emit("FFmpeg conversion failed")
+                else:
+                    self.progress.emit(100)
+                    self.finished.emit(self.output_path)
+
+            except Exception as e:
+                self.error.emit(str(e))
+
+        else:
+            # Non-video conversion simulated progress bar
+            for i in range(101):
+                self.progress.emit(i)
+                self.msleep(20)
+            self.finished.emit(self.input_path)
+
+    @staticmethod
+    def get_video_duration(path):
+        try:
+            cmd = [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", path
+            ]
+            output = subprocess.check_output(cmd).decode().strip()
+            duration = float(output)
+            if duration <= 0:
+                return 1.0
+            return duration
+        except Exception:
+            return 1.0  # Fallback if ffprobe fails
+
 
 class App(QWidget):
     def __init__(self):
         super().__init__()
         self.file_path = None
+        self.is_video = False
 
         self.setWindowTitle("Simple File Converter")
-        self.setMinimumSize(450, 250)
+        self.setMinimumSize(450, 280)
 
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(15)
 
+        # Title
         title = QLabel("Simple File Converter")
         title.setObjectName("TitleLabel")
         title.setAlignment(Qt.AlignCenter)
@@ -35,6 +120,7 @@ class App(QWidget):
         line.setFrameShadow(QFrame.Sunken)
         main_layout.addWidget(line)
 
+        # Pick file
         file_row = QHBoxLayout()
         self.label = QLabel("No file selected")
         self.label.setObjectName("PathLabel")
@@ -47,33 +133,43 @@ class App(QWidget):
         file_row.addWidget(self.btn_pick)
         main_layout.addLayout(file_row)
 
+        # Format/resolution
         row2 = QHBoxLayout()
-        fmt_text = QLabel("Convert to:")
         self.format_box = QComboBox()
-        self.format_box.addItems([
-            "pdf", "jpg", "png", "docx",
-            "mp4", "mov", "avi", "mkv", "webm", "wmv"
-        ])
+        self.format_box.currentTextChanged.connect(self.update_resolution_enabled)
+
+        self.resolution_box = QComboBox()
+        self.resolution_box.addItem("original")
+        self.resolution_box.setEnabled(False)
 
         self.btn_convert = QPushButton("Convert")
         self.btn_convert.clicked.connect(self.convert)
         self.btn_convert.setEnabled(False)
 
-        row2.addWidget(fmt_text)
+        row2.addWidget(QLabel("Convert to:"))
         row2.addWidget(self.format_box)
+        row2.addWidget(QLabel("Resolution:"))
+        row2.addWidget(self.resolution_box)
         row2.addStretch()
         row2.addWidget(self.btn_convert)
-
         main_layout.addLayout(row2)
 
+        # Progress bar (hidden by default)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFixedHeight(20)
+        self.progress_bar.hide()
+        main_layout.addWidget(self.progress_bar)
+
+        # Status
         self.status_label = QLabel("Select a file to get started.")
         self.status_label.setObjectName("StatusLabel")
-        self.status_label.setAlignment(Qt.AlignLeft)
         main_layout.addWidget(self.status_label)
 
         main_layout.addStretch()
         self.setLayout(main_layout)
-
+        
         self.setStyleSheet("""
             QWidget {
                 font-family: Segoe UI, Arial;
@@ -108,45 +204,96 @@ class App(QWidget):
 
     def pick(self):
         path, _ = QFileDialog.getOpenFileName(self, "Pick a file")
-        if path:
-            self.file_path = path
-            self.label.setText(path)
-            self.btn_convert.setEnabled(True)
-            self.status_label.setText("Ready to convert.")
+        if not path:
+            return
+
+        self.file_path = path
+        self.label.setText(path)
+        self.btn_convert.setEnabled(True)
+
+        ext = path.split(".")[-1].lower()
+        self.is_video = ext in VIDEO_FORMATS
+
+        self.format_box.clear()
+        self.resolution_box.clear()
+        self.resolution_box.addItem("original")
+
+        if self.is_video:
+            self.format_box.addItems(VIDEO_FORMATS)
+            self.load_video_resolutions(path)
+        else:
+            self.format_box.addItems(DOC_FORMATS)
+            self.resolution_box.setEnabled(False)
+
+    def load_video_resolutions(self, path):
+        try:
+            # Use ffprobe to get video height
+            cmd = [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=height",
+                "-of", "csv=p=0",
+                path
+            ]
+            output = subprocess.check_output(cmd).decode().strip()
+            src_h = int(output)
+
+            allowed = ["original"]
+            if src_h >= 480:
+                allowed.append("480p")
+            if src_h >= 720:
+                allowed.append("720p")
+            if src_h >= 1080:
+                allowed.append("1080p")
+
+            self.resolution_box.clear()
+            self.resolution_box.addItems(allowed)
+            self.resolution_box.setEnabled(True)
+        except Exception:
+            self.resolution_box.clear()
+            self.resolution_box.addItem("original")
+            self.resolution_box.setEnabled(True)
+
+    def update_resolution_enabled(self):
+        ext = self.format_box.currentText()
+        if self.is_video and ext in VIDEO_FORMATS:
+            self.resolution_box.setEnabled(True)
+        else:
+            self.resolution_box.setEnabled(False)
 
     def convert(self):
         if not self.file_path:
-            self.status_label.setText("No file selected.")
             return
 
-        url = "http://127.0.0.1:5000/convert"
-        target = self.format_box.currentText()
+        output_path = os.path.join(tempfile.gettempdir(), f"converted.{self.format_box.currentText()}")
+        self.progress_bar.show()
+        self.progress_bar.setValue(0)
 
-        try:
-            with open(self.file_path, 'rb') as f:
-                files = {'file': f}
-                data = {'target_ext': target}
-                resp = requests.post(url, files=files, data=data, timeout=120)
-        except requests.exceptions.RequestException as e:
-            self.status_label.setText(f"Error: {e}")
-            return
+        self.thread = ConversionThread(
+            input_path=self.file_path,
+            target_ext=self.format_box.currentText(),
+            resolution=self.resolution_box.currentText(),
+            output_path=output_path
+        )
 
-        if resp.status_code == 200:
-            save_path, _ = QFileDialog.getSaveFileName(
-                self, "Save Converted File", f"output.{target}"
-            )
-            if save_path:
-                with open(save_path, 'wb') as out:
-                    out.write(resp.content)
-                self.status_label.setText(f"Saved: {save_path}")
-            else:
-                self.status_label.setText("Save canceled.")
+        self.thread.progress.connect(self.progress_bar.setValue)
+        self.thread.finished.connect(self.on_conversion_finished)
+        self.thread.error.connect(lambda e: QMessageBox.critical(self, "Error", e))
+        self.thread.start()
+        self.status_label.setText("Converting...")
+
+    def on_conversion_finished(self, output_path):
+        save_path, _ = QFileDialog.getSaveFileName(self, "Save Converted File", os.path.basename(output_path))
+        if save_path:
+            shutil.copyfile(output_path, save_path)
+            self.status_label.setText(f"Saved: {save_path}")
         else:
-            self.status_label.setText(f"Conversion failed: {resp.text}")
+            self.status_label.setText("Save canceled.")
+        self.progress_bar.setValue(0)
+        self.progress_bar.hide()
 
-if __name__ == '__main__':
-    from PySide6.QtWidgets import QApplication
-    import sys
+
+if __name__ == "__main__":
     app = QApplication(sys.argv)
     w = App()
     w.show()
