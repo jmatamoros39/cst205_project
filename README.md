@@ -1,7 +1,7 @@
 # Selkie Converter
 # Authors: Anthony Cervantes, Jiyun Go, Jose Matamoros, Alex Hernandez
 
-#Purpose
+## Purpose
 The Selkie Conversion app is a desktop app used to:
 - Convert video files (MP4, MOV, AVI, MKV, WebM, WMV)
 - Convert document files (PDF, JPG, PNG, DOCX) using ConvertAPI
