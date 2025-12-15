@@ -17,7 +17,7 @@ VIDEO_FORMATS = ["mp4", "mov", "avi", "mkv", "webm", "wmv"]
 DOC_FORMATS = ["pdf", "jpg", "png", "docx"]
 RES_MAP = {"480p": 480, "720p": 720, "1080p": 1080}
 
-# --- ConversionThread for FFmpeg ---
+# FFMPEG implemented
 class ConversionThread(QThread):
     progress = Signal(int)
     finished = Signal(bytes, str)
@@ -302,17 +302,17 @@ class App(QWidget):
         self.progress_bar.setValue(0)
         self.progress_bar.hide()
         self.status_label.setText("Conversion complete!")
-        self.btn_convert.setEnabled(True)  # Re-enable button
+        self.btn_convert.setEnabled(True)
         self.ask_save_or_email()
 
     def on_conversion_error(self, message):
         self.progress_bar.setValue(0)
         self.progress_bar.hide()
         self.status_label.setText(message)
-        self.btn_convert.setEnabled(True)  # Re-enable button
+        self.btn_convert.setEnabled(True)
         QMessageBox.critical(self, "Error", message)
 
-    # --- Save or Email ---
+    # Email/save functionality
     def ask_save_or_email(self):
         choice = QMessageBox.question(
             self,
@@ -354,36 +354,31 @@ class App(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to send email: {e}")
 
-# --- Splash screen ---
+# Splashscreen Implementation
 def show_splash(app):
     width, height = 500, 250
 
     # Load your logo
-    logo = QPixmap("img/csumb_logo.jpg")  # Replace with your logo path
-    # Scale to fit within splash without cutting off
+    logo = QPixmap("img/csumb_logo.jpg")
     logo = logo.scaled(width, height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
 
     # Create a pixmap for the splash
     pixmap = QPixmap(width, height)
-    pixmap.fill(Qt.white)  # fallback background color
+    pixmap.fill(Qt.white)
 
-    # Paint the logo with opacity, centered
     from PySide6.QtGui import QPainter
     painter = QPainter(pixmap)
-    painter.setOpacity(0.1)  # semi-transparent
-    # Center the logo
+    painter.setOpacity(0.1)
+
     x = (width - logo.width()) // 2
     y = (height - logo.height()) // 2
     painter.drawPixmap(x, y, logo)
     painter.setOpacity(1.0)  # reset for text
     painter.end()
 
-    # Create the splash screen
     splash = QSplashScreen(pixmap)
     splash.setFont(QFont("Tahoma", 28, QFont.Bold))
     splash.showMessage("File Converter", alignment=Qt.AlignCenter, color=Qt.black)
-
-    # Center splash on screen
     screen_geo = app.primaryScreen().geometry()
     splash.move((screen_geo.width() - width) // 2, (screen_geo.height() - height) // 2)
     splash.show()
