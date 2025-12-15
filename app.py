@@ -1,4 +1,5 @@
 from flask import Flask, request, send_file
+from flask_mail import Mail, Message
 import tempfile
 import os
 import subprocess
@@ -6,15 +7,77 @@ import convertapi
 
 app = Flask(__name__)
 
-# === HARDCODED KEYS ===
-CONVERTAPI_KEY = "JEpzAAk0CMDmgE4VxQRS7FJJJspbUqa6"
-convertapi.api_secret = CONVERTAPI_KEY
-convertapi.api_credentials = CONVERTAPI_KEY
+EMAIL_USERNAME = os.environ.get("EMAIL_USERNAME")
+EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD")
 
+if not EMAIL_USERNAME or not EMAIL_PASSWORD:
+    raise ValueError("EMAIL_USERNAME and EMAIL_PASSWORD must be set as environment variables before running the app.")
+
+app.config["MAIL_SERVER"] = "smtp.gmail.com"
+app.config["MAIL_PORT"] = 587
+app.config["MAIL_USE_TLS"] = True
+app.config["MAIL_USE_SSL"] = False
+app.config["MAIL_USERNAME"] = EMAIL_USERNAME
+app.config["MAIL_PASSWORD"] = EMAIL_PASSWORD
+app.config["MAIL_DEFAULT_SENDER"] = EMAIL_USERNAME
+
+mail = Mail(app)
+
+CONVERTAPI_KEY = os.environ.get("CONVERTAPI_SECRET")
+if not CONVERTAPI_KEY:
+    raise ValueError("CONVERTAPI_SECRET environment variable must be set before running the app.")
+
+convertapi.api_secret = CONVERTAPI_KEY
+convertapi.api_credentials = CONVERTAPI_KEY  # Some versions require both
 VIDEO_FORMATS = ["mp4", "mov", "avi", "mkv", "webm", "wmv"]
 DOC_FORMATS = ["pdf", "jpg", "png", "docx"]
 
 RES_MAP = {"480p": 480, "720p": 720, "1080p": 1080}
+
+EMAIL_USERNAME = "your_email@gmail.com"
+mail = Mail(app)
+
+# Sending files via email
+@app.route("/send", methods=["POST"])
+def send_email():
+    receiver_email = request.form.get("receiver_email")
+    message_text = request.form.get("message")
+    file = request.files.get("file")
+
+    print(f"Form data: {request.form}")
+    print(f"Files: {request.files}")
+    print(f"File object: {file}")
+
+    if not receiver_email or message_text is None:
+        return "Missing required fields", 400
+
+    try:
+        msg = Message(
+            subject="Converted File",
+            sender=EMAIL_USERNAME,
+            recipients=[receiver_email],
+        )
+        msg.body = message_text
+
+        if file:
+            print("Attaching file to email...")
+            msg.attach(
+                filename=file.filename,
+                content_type=file.content_type or "application/octet-stream",
+                data=file.read(),
+            )
+        else:
+            print("No file attached to email.")
+
+        mail.send(msg)
+        print(f"Email sent to {receiver_email}")
+
+        return "Email sent", 200
+
+    except Exception as e:
+        print("Error sending email:", e)
+        return f"Error sending email: {e}", 500
+
 
 
 @app.route("/video-info", methods=["POST"])
