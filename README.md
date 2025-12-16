@@ -73,7 +73,6 @@ pip install -r requirements.txt
 - requests
 - convertapi
 - filetype
-- gmail-api
 
 ### 3️⃣ Configure Environment Variables
 
