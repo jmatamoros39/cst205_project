@@ -192,20 +192,22 @@ def send_email():
 
     try:
         msg = Message(
-            "Converted File", sender=EMAIL_USERNAME, recipients=[receiverEmail]
+            "[Selkie Converter] Your file has been converted 📁",
+            sender=EMAIL_USERNAME,
+            recipients=[receiverEmail],
         )
         msg.body = messages
 
         if file:  # Attach file if provided
-            print("!!!Attaching file to email!!!")
+            print("send_email(): Attaching file to email")
             msg.attach(
                 filename=file.filename, 
                 content_type=file.content_type or "application/octet-stream", 
                 data=file.read()
             )
         else:
-            print("No file attached to email.")
-        
+            print("send_email(): No file attached to email.")
+
         mail.send(msg)
         print(f"Email sent successfully to {receiverEmail}")
         return "Email sent", 200
